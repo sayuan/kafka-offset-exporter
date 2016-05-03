@@ -19,6 +19,17 @@ class KafkaOffsetUpdater (config: Config) extends Runnable {
     val zkClient = new ZkClient(config.zookeeper, 30000, 30000, new ZKStringSerializer())
     val zkUtils = ZkUtils(zkClient, false)
 
+    for (group <- zkUtils.getConsumerGroups();
+         (topic, partitions) <- zkUtils.getPartitionsForTopics(zkUtils.getTopicsByConsumerGroup(group));
+         pid <- partitions) {
+
+      val (offset, stat) = zkUtils.readDataMaybeNull(s"${ZkUtils.ConsumersPath}/$group/offsets/$topic/$pid")
+      if (offset.isDefined) {
+        groupOffsetGauge.labels(topic, pid.toString, group).set(offset.get.toDouble)
+        groupTimestampGauge.labels(topic, pid.toString, group).set(stat.getMtime)
+      }
+    }
+
     for (topic <- zkUtils.getAllTopics()) {
       for (pid <- zkUtils.getPartitionsForTopics(Seq(topic))(topic)) {
         val topicAndPartition = TopicAndPartition(topic, pid)
@@ -47,17 +58,6 @@ class KafkaOffsetUpdater (config: Config) extends Runnable {
           case None =>
             logger.warn("No broker for partition %s - %s".format(topic, pid))
         }
-      }
-    }
-
-    for (group <- zkUtils.getConsumerGroups();
-         (topic, partitions) <- zkUtils.getPartitionsForTopics(zkUtils.getTopicsByConsumerGroup(group));
-         pid <- partitions) {
-
-      val (offset, stat) = zkUtils.readDataMaybeNull(s"${ZkUtils.ConsumersPath}/$group/offsets/$topic/$pid")
-      if (offset.isDefined) {
-        groupOffsetGauge.labels(topic, pid.toString, group).set(offset.get.toDouble)
-        groupTimestampGauge.labels(topic, pid.toString, group).set(stat.getMtime)
       }
     }
 
