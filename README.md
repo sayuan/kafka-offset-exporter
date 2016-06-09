@@ -1,5 +1,7 @@
 # kafka-offset-exporter
 
+![screenshot](https://github.com/sayuan/kafka-offset-exporter/raw/master/screenshot.png)
+
 ```
 $ java -jar kafka-offset-exporter-assembly-0.0.1.jar --help
 kafka-offset-exporter
