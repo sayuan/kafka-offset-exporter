@@ -14,7 +14,7 @@ object KafkaOffsetExporter {
       head("kafka-offset-exporter")
       opt[String]("zookeeper") valueName("<zk1>,<zk2>...") action { (x,c) => c.copy(zookeeper = x) } text("ZooKeeper connect string.")
       opt[Int]("interval") action { (x,c) => c.copy(interval = x) } text("update interval in seconds.")
-      opt[Int]("port") action { (x,c) => c.copy(interval = x) } text("port number.")
+      opt[Int]("port") action { (x,c) => c.copy(port = x) } text("port number.")
       help("help") text("prints this usage text")
     }
     parser.parse(args, Config()) match {
