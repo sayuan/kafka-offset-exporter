@@ -13,6 +13,7 @@ libraryDependencies += "io.prometheus" % "simpleclient_hotspot" % "0.0.14"
 libraryDependencies += "io.prometheus" % "simpleclient_servlet" % "0.0.14"
 libraryDependencies += "joda-time" % "joda-time" % "2.3"
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.4.0"
+libraryDependencies += "org.json4s" %% "json4s-jackson" % "3.4.0"
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = true)
 assemblyMergeStrategy in assembly := {

@@ -1,24 +1,30 @@
 package net.sayuan.kafka
 
+import java.io.File
 import java.util.concurrent.{Executors, TimeUnit}
 
 import io.prometheus.client.exporter.MetricsServlet
+import org.apache.log4j.{Level, Logger}
 import org.eclipse.jetty.server.Server
 import org.eclipse.jetty.servlet.{ServletContextHandler, ServletHolder}
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
 
-case class Config(zookeeper: String = "localhost:2181", interval: Int = 60, port: Int = 9991)
+case class Arguments(config: String = "config.json")
 
 object KafkaOffsetExporter {
   def main(args: Array[String]) {
-    val parser = new scopt.OptionParser[Config]("kafka-offset-exporter") {
+    implicit val formats = DefaultFormats
+    val parser = new scopt.OptionParser[Arguments]("kafka-offset-exporter") {
       head("kafka-offset-exporter")
-      opt[String]("zookeeper") valueName("<zk1>,<zk2>...") action { (x,c) => c.copy(zookeeper = x) } text("ZooKeeper connect string.")
-      opt[Int]("interval") action { (x,c) => c.copy(interval = x) } text("update interval in seconds.")
-      opt[Int]("port") action { (x,c) => c.copy(port = x) } text("port number.")
+      opt[String]("config") action { (x,c) => c.copy(config = x) } text("config file.")
       help("help") text("prints this usage text")
     }
-    parser.parse(args, Config()) match {
-      case Some(config) => start(config)
+    parser.parse(args, Arguments()) match {
+      case Some(args) => {
+        val config = parse(new File(args.config)).extract[Config]
+        start(config)
+      }
       case _ =>
     }
   }
