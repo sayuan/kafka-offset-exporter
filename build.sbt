@@ -1,12 +1,12 @@
 name := "kafka-offset-exporter"
 
-version := "0.0.1"
+version := "0.1.0"
 
 organization := "net.sayuan"
 
 scalaVersion := "2.11.7"
 
-libraryDependencies += "org.apache.kafka" %% "kafka" % "0.9.0.1"
+libraryDependencies += "org.apache.kafka" %% "kafka" % "0.10.1.0"
 libraryDependencies += "org.eclipse.jetty" % "jetty-servlet" % "9.3.0.M2"
 libraryDependencies += "io.prometheus" % "simpleclient" % "0.0.14"
 libraryDependencies += "io.prometheus" % "simpleclient_hotspot" % "0.0.14"
