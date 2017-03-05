@@ -3,13 +3,17 @@ package net.sayuan.kafka
 import java.util.concurrent.Executors
 
 import io.prometheus.client.Gauge
-import kafka.api.{OffsetRequest, PartitionOffsetRequestInfo}
-import kafka.common.TopicAndPartition
+import kafka.api.{OffsetFetchRequest, OffsetFetchResponse, OffsetRequest, PartitionOffsetRequestInfo}
+import kafka.client.ClientUtils
+import kafka.common.{OffsetMetadataAndError, TopicAndPartition}
 import kafka.consumer.SimpleConsumer
-import kafka.utils.{Json, ZkUtils}
+import kafka.utils.{Json, ZKGroupTopicDirs, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
+import org.I0Itec.zkclient.exception.ZkNoNodeException
+import org.apache.kafka.common.protocol.Errors
 import org.apache.log4j.{Level, Logger}
 
+import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
@@ -19,7 +23,6 @@ class KafkaOffsetUpdater(config: Config) extends Runnable {
 
   val logEndOffsetSizeGauge = Gauge.build().name("kafka_log_logendoffset").help("log end offset").labelNames("topic", "partition").register()
   val groupOffsetGauge = Gauge.build().name("kafka_group_offset").help("group offset").labelNames("topic", "partition", "group").register()
-  val groupTimestampGauge = Gauge.build().name("kafka_group_timestamp").help("group timestamp").labelNames("topic", "partition", "group").register()
 
   implicit val ec = new ExecutionContext {
     val threadPool = Executors.newFixedThreadPool(30)
@@ -36,12 +39,50 @@ class KafkaOffsetUpdater(config: Config) extends Runnable {
     counter += 1
     logger.info(s"Start the $counter round")
     try {
-      val topicGroups = config.topicGroups
       var futures = List[Future[Unit]]()
 
-      for ((topic, partitions) <- zkUtils.getPartitionsForTopics(topicGroups.keys.toSeq)) {
-        val groups = topicGroups(topic)
+      val groupTopics = mutable.Map[String, List[String]]().withDefaultValue(Nil)
+      for (topic <- config.topicGroups.keys) {
+        for (group <- config.topicGroups(topic)) {
+          groupTopics(group) = topic :: groupTopics(group)
+        }
+      }
 
+      for (group <- groupTopics.keys) {
+        val topics = groupTopics(group)
+        val topicPartitions = zkUtils.getPartitionsForTopics(topics).flatMap { case (topic, partitions) => partitions.map(TopicAndPartition(topic, _))}.toList
+
+        val channel = ClientUtils.channelToOffsetManager(group, zkUtils, 600, 300)
+        channel.send(OffsetFetchRequest(group, topicPartitions))
+        val offsetFetchResponse = OffsetFetchResponse.readFrom(channel.receive().payload())
+        channel.disconnect()
+
+        offsetFetchResponse.requestInfo.foreach { case (topicAndPartition, offsetAndMetadata) =>
+          futures = Future {
+            val topic = topicAndPartition.topic
+            val partition = topicAndPartition.partition
+            offsetAndMetadata match {
+              case OffsetMetadataAndError.NoOffset =>
+                val topicDirs = new ZKGroupTopicDirs(group, topicAndPartition.topic)
+                // this group may not have migrated off zookeeper for offsets storage (we don't expose the dual-commit option in this tool
+                // (meaning the lag may be off until all the consumers in the group have the same setting for offsets storage)
+                try {
+                  val offset = zkUtils.readData(topicDirs.consumerOffsetDir + "/" + topicAndPartition.partition)._1.toLong
+                  groupOffsetGauge.labels(topic, partition.toString, group).set(offset)
+                } catch {
+                  case z: ZkNoNodeException =>
+                    println(s"Could not fetch offset from zookeeper for group '$group' partition '$topicAndPartition' due to missing offset data in zookeeper.", z)
+                }
+              case offsetAndMetaData if offsetAndMetaData.error == Errors.NONE.code =>
+                groupOffsetGauge.labels(topic, partition.toString, group).set(offsetAndMetaData.offset)
+              case _ =>
+                println(s"Could not fetch offset from kafka for group '$group' partition '$topicAndPartition' due to ${Errors.forCode(offsetAndMetadata.error).exception}.")
+            }
+          } :: futures
+        }
+      }
+
+      for ((topic, partitions) <- zkUtils.getPartitionsForTopics(config.topicGroups.keys.toSeq)) {
         for (pid <- partitions) {
           val topicAndPartition = TopicAndPartition(topic, pid)
           futures = Future {
@@ -72,18 +113,6 @@ class KafkaOffsetUpdater(config: Config) extends Runnable {
               }
             }
           } :: futures
-
-          for (group <- groups) {
-            futures = Future {
-              val (offset, stat) = zkUtils.readDataMaybeNull(s"${ZkUtils.ConsumersPath}/$group/offsets/$topic/$pid")
-              if (offset.isDefined) {
-                groupOffsetGauge.labels(topic, pid.toString, group).set(offset.get.toDouble)
-                groupTimestampGauge.labels(topic, pid.toString, group).set(stat.getMtime)
-              } else {
-                logger.error("Group %s not exist for partition %s - %s".format(group, topic, pid))
-              }
-            } :: futures
-          }
         }
       }
 
