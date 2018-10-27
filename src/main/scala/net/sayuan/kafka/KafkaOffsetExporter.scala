@@ -1,12 +1,12 @@
 package net.sayuan.kafka
 
 import java.io.File
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util
 
 import io.prometheus.client.exporter.MetricsServlet
-import org.apache.log4j.{Level, Logger}
+import javax.servlet.DispatcherType
 import org.eclipse.jetty.server.Server
-import org.eclipse.jetty.servlet.{ServletContextHandler, ServletHolder}
+import org.eclipse.jetty.servlet.{FilterHolder, ServletContextHandler}
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 
@@ -27,6 +27,7 @@ object KafkaOffsetExporter {
       }
       case _ =>
     }
+    start(null)
   }
 
   def start(config: Config) {
@@ -34,11 +35,8 @@ object KafkaOffsetExporter {
     val context = new ServletContextHandler()
     context.setContextPath("/")
     server.setHandler(context)
-    context.addServlet(new ServletHolder(
-      new MetricsServlet()), "/metrics")
-
-    val scheduler = Executors.newScheduledThreadPool(1)
-    scheduler.scheduleAtFixedRate(new KafkaOffsetUpdater(config), 0, config.interval, TimeUnit.SECONDS)
+    context.addFilter(new FilterHolder(new KafkaOffsetFilter(config)), "/metrics", util.EnumSet.of(DispatcherType.REQUEST))
+    context.addServlet(classOf[MetricsServlet], "/metrics")
 
     server.start()
     server.join()
