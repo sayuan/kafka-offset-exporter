@@ -51,7 +51,7 @@ class KafkaOffsetFilter(config: Config) extends Filter {
       val topics = groupTopics(group)
       val topicPartitions = zkUtils.getPartitionsForTopics(topics).flatMap { case (topic, partitions) => partitions.map(TopicAndPartition(topic, _))}.toList
 
-      val channel = ClientUtils.channelToOffsetManager(group, zkUtils, 600, 300)
+      val channel = ClientUtils.channelToOffsetManager(group, zkUtils)
       channel.send(OffsetFetchRequest(group, topicPartitions))
       val offsetFetchResponse = OffsetFetchResponse.readFrom(channel.receive().payload())
       channel.disconnect()
