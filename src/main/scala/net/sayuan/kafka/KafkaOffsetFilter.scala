@@ -39,7 +39,7 @@ class KafkaOffsetFilter(config: Config) extends Filter {
   val zkUtils = ZkUtils(zkClient, false)
 
   override def doFilter(request: ServletRequest, response: ServletResponse, chain: FilterChain): Unit = {
-    var futures = List[Future[Unit]]()
+    var futures = List[Future[_]]()
 
     val groupTopics = mutable.Map[String, List[String]]().withDefaultValue(Nil)
     for (topic <- config.topicGroups.keys) {
@@ -60,24 +60,26 @@ class KafkaOffsetFilter(config: Config) extends Filter {
 
         offsetFetchResponse.requestInfo.foreach { case (topicAndPartition, offsetAndMetadata) =>
           futures = Future {
-            val topic = topicAndPartition.topic
-            val partition = topicAndPartition.partition
-            offsetAndMetadata match {
-              case OffsetMetadataAndError.NoOffset =>
-                val topicDirs = new ZKGroupTopicDirs(group, topicAndPartition.topic)
-                // this group may not have migrated off zookeeper for offsets storage (we don't expose the dual-commit option in this tool
-                // (meaning the lag may be off until all the consumers in the group have the same setting for offsets storage)
-                try {
-                  val offset = zkUtils.readData(topicDirs.consumerOffsetDir + "/" + topicAndPartition.partition)._1.toLong
-                  groupOffsetGauge.labels(topic, partition.toString, group).set(offset)
-                } catch {
-                  case z: ZkNoNodeException =>
-                    println(s"Could not fetch offset from zookeeper for group '$group' partition '$topicAndPartition' due to missing offset data in zookeeper.", z)
-                }
-              case offsetAndMetaData if offsetAndMetaData.error == Errors.NONE.code =>
-                groupOffsetGauge.labels(topic, partition.toString, group).set(offsetAndMetaData.offset)
-              case _ =>
-                println(s"Could not fetch offset from kafka for group '$group' partition '$topicAndPartition' due to ${Errors.forCode(offsetAndMetadata.error).exception}.")
+            Try {
+              val topic = topicAndPartition.topic
+              val partition = topicAndPartition.partition
+              offsetAndMetadata match {
+                case OffsetMetadataAndError.NoOffset =>
+                  val topicDirs = new ZKGroupTopicDirs(group, topicAndPartition.topic)
+                  // this group may not have migrated off zookeeper for offsets storage (we don't expose the dual-commit option in this tool
+                  // (meaning the lag may be off until all the consumers in the group have the same setting for offsets storage)
+                  try {
+                    val offset = zkUtils.readData(topicDirs.consumerOffsetDir + "/" + topicAndPartition.partition)._1.toLong
+                    groupOffsetGauge.labels(topic, partition.toString, group).set(offset)
+                  } catch {
+                    case z: ZkNoNodeException =>
+                      println(s"Could not fetch offset from zookeeper for group '$group' partition '$topicAndPartition' due to missing offset data in zookeeper.", z)
+                  }
+                case offsetAndMetaData if offsetAndMetaData.error == Errors.NONE.code =>
+                  groupOffsetGauge.labels(topic, partition.toString, group).set(offsetAndMetaData.offset)
+                case _ =>
+                  println(s"Could not fetch offset from kafka for group '$group' partition '$topicAndPartition' due to ${Errors.forCode(offsetAndMetadata.error).exception}.")
+              }
             }
           } :: futures
         }
@@ -87,8 +89,8 @@ class KafkaOffsetFilter(config: Config) extends Filter {
     for ((topic, partitions) <- zkUtils.getPartitionsForTopics(config.topicGroups.keys.toSeq)) {
       for (pid <- partitions) {
         val topicAndPartition = TopicAndPartition(topic, pid)
-        Try {
-          futures = Future {
+        futures = Future {
+          Try {
             zkUtils.getLeaderForPartition(topic, pid) match {
               case Some(bid) =>
                 zkUtils.readDataMaybeNull(s"${ZkUtils.BrokerIdsPath}/$bid") match {
@@ -115,8 +117,8 @@ class KafkaOffsetFilter(config: Config) extends Filter {
                 logger.error("No broker for partition %s - %s".format(topic, pid))
               }
             }
-          } :: futures
-        }
+          }
+        } :: futures
       }
     }
 
